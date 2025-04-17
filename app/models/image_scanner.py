@@ -2,125 +2,101 @@ import os
 import cv2
 import numpy as np
 from PIL import Image
+import google.generativeai as genai
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 class ImageScanner:
     def __init__(self):
-        # Directory where labeled food images are stored
-        self.labeled_images_dir = "app/static/labeled_images"
+        # Configure Google API with the API key from environment variables
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError("Google API key not found. Please set GOOGLE_API_KEY in .env file.")
+        
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
+        # Directory where uploaded images are stored
+        self.uploads_dir = "app/static/uploads"
         
         # Create the directory if it doesn't exist
-        os.makedirs(self.labeled_images_dir, exist_ok=True)
+        os.makedirs(self.uploads_dir, exist_ok=True)
     
-    def preprocess_image(self, image_path):
-        """Preprocess the image for feature extraction using OpenCV"""
-        # Read the image
-        img = cv2.imread(image_path)
-        
-        if img is None:
-            raise ValueError(f"Could not read image at {image_path}")
-        
-        # Resize image to a standard size
-        img = cv2.resize(img, (224, 224))
-        
-        # Convert to RGB (OpenCV loads in BGR)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        
-        return img
-    
-    def extract_features(self, img):
-        """Extract features from the preprocessed image using OpenCV"""
-        # Convert to grayscale for feature extraction
-        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-        
-        # Extract features using SIFT (Scale-Invariant Feature Transform)
-        sift = cv2.SIFT_create()
-        keypoints, descriptors = sift.detectAndCompute(gray, None)
-        
-        return keypoints, descriptors
-    
-    def compare_images(self, query_image_path, max_results=3, threshold=0.8):
-        """Compare query image with labeled images and return the best matches
-        that meet the threshold requirement"""
-        if not os.path.exists(query_image_path):
-            raise ValueError(f"Query image not found at {query_image_path}")
-        
-        # Get all labeled images
-        labeled_images = []
-        for filename in os.listdir(self.labeled_images_dir):
-            if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-                # Extract label from filename (assuming format: label_name.jpg)
-                label = os.path.splitext(filename)[0]
-                img_path = os.path.join(self.labeled_images_dir, filename)
-                labeled_images.append((label, img_path))
-        
-        if not labeled_images:
-            return [("No matches", 0)]
-        
-        # Process query image
-        query_img = self.preprocess_image(query_image_path)
-        query_keypoints, query_descriptors = self.extract_features(query_img)
-        
-        if query_descriptors is None:
-            return [("Could not extract features", 0)]
-        
-        # Compare with each labeled image
-        matches = []
-        for label, img_path in labeled_images:
-            try:
-                # Process labeled image
-                labeled_img = self.preprocess_image(img_path)
-                labeled_keypoints, labeled_descriptors = self.extract_features(labeled_img)
-                
-                if labeled_descriptors is None:
-                    continue
-                
-                # Match descriptors
-                bf = cv2.BFMatcher()
-                matches_list = bf.knnMatch(query_descriptors, labeled_descriptors, k=2)
-                
-                # Apply ratio test to filter good matches
-                good_matches = []
-                for m, n in matches_list:
-                    if m.distance < 0.75 * n.distance:
-                        good_matches.append(m)
-                
-                match_ratio = len(good_matches) / max(len(query_keypoints), 1)
-                matches.append((label, match_ratio))
-            
-            except Exception as e:
-                print(f"Error processing {img_path}: {str(e)}")
-                continue
-        
-        # Sort by match ratio (descending)
-        matches.sort(key=lambda x: x[1], reverse=True)
-        
-        # Filter matches by threshold (80%)
-        filtered_matches = [match for match in matches if match[1] >= threshold]
-        
-        # If no matches meet the threshold, return a message
-        if not filtered_matches:
-            return [("No matches meet the threshold", 0)]
-            
-        # Return top filtered matches
-        return filtered_matches[:max_results]
-    
-    def save_labeled_image(self, image_path, label):
-        """Save a new labeled image to the labeled images directory"""
+    def scan_food_image(self, image_path):
+        """
+        Scan food image using Google Gemini API to get nutritional information
+        """
         try:
-            # Create a filename from the label
-            filename = f"{label.lower().replace(' ', '_')}.jpg"
-            destination_path = os.path.join(self.labeled_images_dir, filename)
+            # Open the image with PIL
+            img = Image.open(image_path)
             
-            # Read the original image
-            img = cv2.imread(image_path)
+            # Create a prompt that asks for specific nutritional information
+            prompt = """
+            Analyze this food image and provide detailed nutritional information in the following format:
+            Food Item: [name of the food item]
+            Protein: [protein amount in grams]
+            Details: [brief description of the food item]
+            Ingredients: [main ingredients]
+            Calories: [calorie count]
+            Fat: [fat content in grams]
+            Carbs: [carbohydrate content in grams]
+
+            If you're uncertain about any values, provide an estimate and indicate it as such.
+            """
             
-            # Resize to a standard size
-            img = cv2.resize(img, (224, 224))
+            # Generate content using the Google model
+            response = self.model.generate_content([prompt, img])
             
-            # Save the processed image
-            cv2.imwrite(destination_path, img)
+            # Process the response text to extract structured information
+            info = self._extract_nutritional_info(response.text)
             
-            return True, destination_path
-        
+            return info
+            
         except Exception as e:
-            return False, str(e)
+            return {
+                "error": f"Error analyzing image: {str(e)}",
+                "food_item": "N/A",
+                "protein": "N/A",
+                "details": "Unable to process image",
+                "ingredients": "N/A",
+                "calories": "N/A", 
+                "fat": "N/A",
+                "carbs": "N/A"
+            }
+    
+    def _extract_nutritional_info(self, text):
+        """
+        Extract structured nutritional information from the API response text
+        """
+        info = {
+            "food_item": "N/A",
+            "protein": "N/A",
+            "details": "N/A",
+            "ingredients": "N/A", 
+            "calories": "N/A",
+            "fat": "N/A",
+            "carbs": "N/A"
+        }
+        
+        # Parse the response text to extract the information
+        lines = text.strip().split('\n')
+        for line in lines:
+            line = line.strip()
+            if line.lower().startswith('food item:'):
+                info["food_item"] = line[10:].strip()
+            elif line.lower().startswith('protein:'):
+                info["protein"] = line[8:].strip()
+            elif line.lower().startswith('details:'):
+                info["details"] = line[8:].strip()
+            elif line.lower().startswith('ingredients:'):
+                info["ingredients"] = line[12:].strip()
+            elif line.lower().startswith('calories:'):
+                info["calories"] = line[9:].strip()
+            elif line.lower().startswith('fat:'):
+                info["fat"] = line[4:].strip()
+            elif line.lower().startswith('carbs:'):
+                info["carbs"] = line[6:].strip()
+        
+        return info

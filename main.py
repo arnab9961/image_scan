@@ -1,25 +1,23 @@
 import os
-import shutil
-import uuid
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
-from typing import Optional
+from dotenv import load_dotenv
 import uvicorn
 
-from app.models.image_scanner import ImageScanner
 from app.api.endpoints import router as api_router
+
+# Load environment variables
+load_dotenv()
 
 # Create FastAPI app
 app = FastAPI(
-    title="Food Image Scanner API",
-    description="API for scanning food images using OpenCV",
+    title="Food Nutritional Scanner API",
+    description="API for scanning food images and providing nutritional information using Google AI",
     version="1.0.0"
 )
 
-# Create folders if they don't exist
+# Create uploads folder if it doesn't exist
 os.makedirs("app/static/uploads", exist_ok=True)
-os.makedirs("app/static/labeled_images", exist_ok=True)
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="app/static"), name="static")

@@ -2,7 +2,7 @@ import os
 import cv2
 import numpy as np
 from PIL import Image
-import google.generativeai as genai
+from openai import OpenAI
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -10,13 +10,13 @@ load_dotenv()
 
 class ImageScanner:
     def __init__(self):
-        # Configure Google API with the API key from environment variables
-        api_key = os.getenv("GOOGLE_API_KEY")
+        # Configure OpenAI with the API key from environment variables
+        api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            raise ValueError("Google API key not found. Please set GOOGLE_API_KEY in .env file.")
+            raise ValueError("OpenAI API key not found. Please set OPENAI_API_KEY in .env file.")
         
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        # Initialize OpenAI client
+        self.client = OpenAI(api_key=api_key)
         
         # Directory where uploaded images are stored
         self.uploads_dir = "app/static/uploads"
@@ -26,31 +26,47 @@ class ImageScanner:
     
     def scan_food_image(self, image_path):
         """
-        Scan food image using Google Gemini API to get nutritional information
+        Scan food image using OpenAI GPT-4o to get nutritional information
         """
         try:
-            # Open the image with PIL
-            img = Image.open(image_path)
-            
-            # Create a prompt that asks for specific nutritional information
-            prompt = """
-            Analyze this food image and provide detailed nutritional information in the following format:
-            Food Item: [name of the food item]
-            Protein: [protein amount in grams]
-            Details: [brief description of the food item]
-            Ingredients: [main ingredients]
-            Calories: [calorie count]
-            Fat: [fat content in grams]
-            Carbs: [carbohydrate content in grams]
+            # Open the image file
+            with open(image_path, "rb") as image_file:
+                # Generate content using OpenAI's API
+                response = self.client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {
+                            "role": "user", 
+                            "content": [
+                                {
+                                    "type": "text", 
+                                    "text": """
+                                    Analyze this food image and provide detailed nutritional information in the following format:
+                                    Food Item: [name of the food item]
+                                    Protein: [protein amount in grams]
+                                    Details: [brief description of the food item]
+                                    Ingredients: [main ingredients]
+                                    Calories: [calorie count]
+                                    Fat: [fat content in grams]
+                                    Carbs: [carbohydrate content in grams]
 
-            If you're uncertain about any values, provide an estimate and indicate it as such.
-            """
+                                    If you're uncertain about any values, provide an estimate and indicate it as such.
+                                    """
+                                },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:image/jpeg;base64,{self._encode_image(image_path)}"}
+                                }
+                            ]
+                        }
+                    ]
+                )
             
-            # Generate content using the Google model
-            response = self.model.generate_content([prompt, img])
+            # Get the response text
+            response_text = response.choices[0].message.content
             
             # Process the response text to extract structured information
-            info = self._extract_nutritional_info(response.text)
+            info = self._extract_nutritional_info(response_text)
             
             return info
             
@@ -65,6 +81,14 @@ class ImageScanner:
                 "fat": "N/A",
                 "carbs": "N/A"
             }
+    
+    def _encode_image(self, image_path):
+        """
+        Encode image to base64 for API transmission
+        """
+        import base64
+        with open(image_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode('utf-8')
     
     def _extract_nutritional_info(self, text):
         """

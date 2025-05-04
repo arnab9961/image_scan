@@ -33,7 +33,7 @@ class ImageScanner:
             with open(image_path, "rb") as image_file:
                 # Generate content using OpenAI's API
                 response = self.client.chat.completions.create(
-                    model="GPT-4-turbo",
+                    model="gpt-4.1",
                     messages=[
                         {
                             "role": "user", 

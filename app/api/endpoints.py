@@ -33,6 +33,7 @@ class NutritionalInfo(BaseModel):
     calories: str
     fat: str
     carbs: str
+    recipe: str  # Add this field to include recipe in API response
     error: Optional[str] = None
 
 class HealthData(BaseModel):

@@ -49,7 +49,7 @@ class ImageScanner:
                                     Calories: [calorie count]
                                     Fat: [fat content in grams]
                                     Carbs: [carbohydrate content in grams]
-
+                                    Recipe: [ALWAYS include detailed recipe steps, even if you have to estimate based on the food's appearance]
                                     If you're uncertain about any values, provide an estimate and indicate it as such.
                                     """
                                 },
@@ -79,7 +79,8 @@ class ImageScanner:
                 "ingredients": "N/A",
                 "calories": "N/A", 
                 "fat": "N/A",
-                "carbs": "N/A"
+                "carbs": "N/A",
+                "recipe": "N/A"  # Ensure recipe field is included in error response
             }
     
     def _encode_image(self, image_path):
@@ -101,26 +102,53 @@ class ImageScanner:
             "ingredients": "N/A", 
             "calories": "N/A",
             "fat": "N/A",
-            "carbs": "N/A"
+            "carbs": "N/A",
+            "recipe": "N/A",
+            "error": None  # Add error field for potential issues
         }
         
         # Parse the response text to extract the information
         lines = text.strip().split('\n')
+        current_field = None
+        
         for line in lines:
             line = line.strip()
+            if not line:
+                continue
+                
             if line.lower().startswith('food item:'):
-                info["food_item"] = line[10:].strip()
+                info["food_item"] = line[10:].strip() or "N/A"
+                current_field = None
             elif line.lower().startswith('protein:'):
-                info["protein"] = line[8:].strip()
+                info["protein"] = line[8:].strip() or "N/A"
+                current_field = None
             elif line.lower().startswith('details:'):
-                info["details"] = line[8:].strip()
+                info["details"] = line[8:].strip() or "N/A"
+                current_field = "details"
             elif line.lower().startswith('ingredients:'):
-                info["ingredients"] = line[12:].strip()
+                info["ingredients"] = line[12:].strip() or "N/A"
+                current_field = "ingredients"
             elif line.lower().startswith('calories:'):
-                info["calories"] = line[9:].strip()
+                info["calories"] = line[9:].strip() or "N/A"
+                current_field = None
             elif line.lower().startswith('fat:'):
-                info["fat"] = line[4:].strip()
+                info["fat"] = line[4:].strip() or "N/A"
+                current_field = None
             elif line.lower().startswith('carbs:'):
-                info["carbs"] = line[6:].strip()
+                info["carbs"] = line[6:].strip() or "N/A"
+                current_field = None
+            elif line.lower().startswith('recipe:'):
+                info["recipe"] = line[7:].strip() or "N/A"
+                current_field = "recipe"
+            # Handle multi-line content for details, ingredients or recipe
+            elif current_field and line:
+                if info[current_field] == "N/A":
+                    info[current_field] = line
+                else:
+                    info[current_field] += "\n" + line
         
+        # Ensure error field is included in the response
+        if "error" in info and not info["error"]:
+            info["error"] = None
+            
         return info
